@@ -1,0 +1,7 @@
+# DECISIONS.md
+
+1. **Indexes.** `employees.emp_code` unique (identity, 409 on duplicates); `(department, emp_code)` for the filtered employee list; `joined_on` and `(department, joined_on)` for the department summary's headcount. `attendance_logs`: unique `(emp_code, date)` (one record per day, race-safe punch-in, per-employee queries, monthly and trend); `(date desc, emp_code)` and `(status, date desc, emp_code)` for the attendance list sort/filter and leaderboard month scans; `(emp_code, punch_in desc)` for finding the open record at punch-out. I rejected a separate index on `late_minutes`: the date range already narrows the scan.
+2. **Punch-in race.** Both requests build the same document and call `insert_one`. The unique `(emp_code, date)` index lets exactly one succeed; the other gets `DuplicateKeyError` and returns 409. There is no read-then-write check to race on.
+3. **Ties.** The leaderboard ranks with `$setWindowFields`/`$rank` and applies `limit` as `rank <= limit` afterwards, so everyone tied at the cutoff is returned (it can exceed `limit`). Ties share a rank, ordered by `emp_code`.
+4. **Headcount.** The summary pipeline starts from `employees` (joined on or before month end) and `$lookup`s the logs, so an employee with no logs still produces a row and is counted.
+5. **At 100x data** I would pre-aggregate monthly numbers per employee (a summary collection updated on punch/regularize) instead of scanning raw logs on every analytics call.
